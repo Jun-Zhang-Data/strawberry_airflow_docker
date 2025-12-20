@@ -1,0 +1,26 @@
+strawberry_bi:
+  target: dev
+  outputs:
+    dev:
+      type: snowflake
+      account: CCYHGCU-MI48905        # your Snowflake account
+      user: JUNZHANGNLP               # your Snowflake user
+      password: zhuzhuI%1zhuzhuI%1
+      role: ACCOUNTADMIN              # or your real role
+      database: STRAWBERRY            # or DEMO_DB if you’re reusing that
+      warehouse: WH_STRAWBERRY          # or WH_STRAWBERRY if you created it
+      schema: BRONZE
+      threads: 4
+      client_session_keep_alive: False
+
+    prod:
+      type: snowflake
+      account: CCYHGCU-MI48905
+      user: JUNZHANGNLP
+      password: zhuzhuI%1zhuzhuI%1
+      role: ACCOUNTADMIN
+      database: STRAWBERRY
+      warehouse: WH_STRAWBERRY
+      schema: BRONZE     # base, overridden by generate_schema_name
+      threads: 4
+      client_session_keep_alive: False
