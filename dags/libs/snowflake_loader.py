@@ -5,27 +5,17 @@ import snowflake.connector
 
 
 def _get_snowflake_connection():
-    """
-    Create a Snowflake connection using env vars.
-
-    Expected env vars:
-      - SNOWFLAKE_ACCOUNT
-      - SNOWFLAKE_USER
-      - SNOWFLAKE_PASSWORD
-      - SNOWFLAKE_ROLE
-      - SNOWFLAKE_WAREHOUSE
-      - SNOWFLAKE_DATABASE
-      - SNOWFLAKE_SCHEMA
-    """
     return snowflake.connector.connect(
         account=os.environ["SNOWFLAKE_ACCOUNT"],
         user=os.environ["SNOWFLAKE_USER"],
         password=os.environ["SNOWFLAKE_PASSWORD"],
-        role=os.environ.get("SNOWFLAKE_ROLE"),
-        warehouse=os.environ.get("SNOWFLAKE_WAREHOUSE"),
-        database=os.environ.get("SNOWFLAKE_DATABASE"),
-        schema=os.environ.get("SNOWFLAKE_SCHEMA"),
+        role=os.environ.get("SNOWFLAKE_ROLE_AIRFLOW") or os.environ.get("SNOWFLAKE_ROLE"),
+        warehouse=os.environ["SNOWFLAKE_WAREHOUSE"],
+        database=os.environ["SNOWFLAKE_DATABASE"],
+        schema=os.environ.get("SNOWFLAKE_SCHEMA", "RAW"),
     )
+
+
 
 
 def ensure_external_loyalty_table_exists():
