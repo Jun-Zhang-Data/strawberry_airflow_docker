@@ -37,12 +37,22 @@ def _parse_iso_utc(s: str) -> datetime:
 def _get_window(**context) -> Tuple[datetime, datetime]:
     """
     Window priority:
-      1) Backfill conf: start_ts + end_ts
-      2) Watermark from LOAD_STATE (last_success_ts -> now)
-      3) Default: last 24 hours
+      1) Env backfill: BACKFILL_START_TS + BACKFILL_END_TS
+      2) Backfill conf: start_ts + end_ts
+      3) Watermark from LOAD_STATE (last_success_ts -> now)
+      4) Default: last 24 hours
     """
     now_utc = datetime.now(timezone.utc).replace(microsecond=0)
 
+    # 1) ENV backfill (your easy method)
+    env_start = os.environ.get("BACKFILL_START_TS", "").strip()
+    env_end = os.environ.get("BACKFILL_END_TS", "").strip()
+    if env_start and env_end:
+        since = _parse_iso_utc(env_start)
+        until = _parse_iso_utc(env_end)
+        return since, until
+
+    # 2) CONF backfill
     conf = {}
     dag_run = context.get("dag_run")
     if dag_run and dag_run.conf:
@@ -50,13 +60,12 @@ def _get_window(**context) -> Tuple[datetime, datetime]:
 
     start_ts = conf.get("start_ts")
     end_ts = conf.get("end_ts")
-
     if start_ts and end_ts:
         since = _parse_iso_utc(start_ts)
         until = _parse_iso_utc(end_ts)
         return since, until
 
-    # Watermark logic (no conf provided)
+    # 3) Watermark
     database = os.environ.get("SNOWFLAKE_DATABASE", "STRAWBERRY")
     schema = os.environ.get("SNOWFLAKE_SCHEMA", "RAW")
     last = get_last_success_ts(database=database, schema=schema, pipeline=DAG_ID, source=SOURCE)
@@ -65,6 +74,7 @@ def _get_window(**context) -> Tuple[datetime, datetime]:
         return now_utc - timedelta(days=1), now_utc
 
     return last, now_utc
+
 
 
 def _write_jsonl(objs: List[Dict[str, Any]], out_path: str) -> None:
