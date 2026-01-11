@@ -17,7 +17,12 @@ SOURCE = "external_loyalty_api_backfill"
 
 
 def _parse_iso_utc(s: str) -> datetime:
-    s = str(s).strip()
+    """
+    Accepts '2026-01-01T00:00:00Z' or '2026-01-01T00:00:00+00:00'
+    """
+    s = (s or "").strip()
+    if not s:
+        raise AirflowFailException("Empty timestamp string")
     if s.endswith("Z"):
         s = s.replace("Z", "+00:00")
     dt = datetime.fromisoformat(s)
@@ -76,6 +81,7 @@ def backfill_fetch_load(**context) -> None:
     ensure_external_loyalty_table_exists(database=database, schema=schema)
 
     ingestion_id = str(uuid.uuid4())
+    rows_loaded = 0
 
     # NOTE: your current demo client is since-only; OK for now.
     # If/when your real API supports an upper bound, update the client and call:
@@ -94,8 +100,8 @@ def backfill_fetch_load(**context) -> None:
     )
 
     print(
-        f"BACKFILL SUCCESS: rows_loaded={rows_loaded}, ingestion_id={ingestion_id}, "
-        f"window={window_since}..{window_until}, run_id={run_id}"
+        f"BACKFILL SUCCESS: Loaded {rows_loaded} rows into {schema}.EXTERNAL_LOYALTY_EVENTS_RAW "
+        f"(ingestion_id={ingestion_id}, run_id={run_id}, window={window_since}..{window_until})"
     )
 
 
