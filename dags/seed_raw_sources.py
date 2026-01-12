@@ -17,47 +17,17 @@ Run:
 - Then run dbt (snapshot/build)
 """
 
-import os
 from datetime import datetime
 
-import snowflake.connector
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+
+# Reuse the shared Snowflake helpers you already have
+from libs.snowflake_loader import _get_snowflake_connection, _database, _schema
 
 
 DAG_ID = "seed_raw_sources"
 DEFAULT_ARGS = {"owner": "airflow", "retries": 0}
-
-
-def _sf_connect():
-    """
-    Connect using env vars (from docker-compose/.env).
-
-    Required:
-      SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_PASSWORD
-    Optional:
-      SNOWFLAKE_ROLE or SNOWFLAKE_ROLE_AIRFLOW
-      SNOWFLAKE_WAREHOUSE
-    """
-    account = os.environ["SNOWFLAKE_ACCOUNT"]
-    user = os.environ["SNOWFLAKE_USER"]
-    password = os.environ["SNOWFLAKE_PASSWORD"]
-
-    role = os.environ.get("SNOWFLAKE_ROLE") or os.environ.get("SNOWFLAKE_ROLE_AIRFLOW")
-    warehouse = os.environ.get("SNOWFLAKE_WAREHOUSE")
-
-    conn_kwargs = dict(
-        account=account,
-        user=user,
-        password=password,
-        client_session_keep_alive=False,
-    )
-    if role:
-        conn_kwargs["role"] = role
-    if warehouse:
-        conn_kwargs["warehouse"] = warehouse
-
-    return snowflake.connector.connect(**conn_kwargs)
 
 
 def _exec_many(cur, statements):
@@ -66,22 +36,19 @@ def _exec_many(cur, statements):
 
 
 def seed_raw_sources():
-    db = os.environ.get("SNOWFLAKE_DATABASE", "").strip()
-    raw_schema = os.environ.get("SNOWFLAKE_SCHEMA", "RAW").strip()
-
-    if not db:
-        raise RuntimeError("SNOWFLAKE_DATABASE is not set. Set it in .env / docker-compose env_file.")
+    db = _database()         # validated SNOWFLAKE_DATABASE
+    raw_schema = _schema()   # validated SNOWFLAKE_SCHEMA (default RAW)
 
     PMS_SEED_FILE = "pms_seed.json"
     SURVEY_SEED_FILE = "survey_seed.json"
     MEMBERSHIP_SEED_FILE = "membership_seed.csv"
 
-    with _sf_connect() as conn:
+    conn = _get_snowflake_connection()
+    try:
         with conn.cursor() as cur:
-            # Show context in logs (super helpful for debugging privileges)
-            cur.execute("select current_user(), current_role()")
-            user_role = cur.fetchone()
-            print("Snowflake context (user, role):", user_role)
+            # Show context in logs (helps debug privileges/role)
+            cur.execute("select current_user(), current_role(), current_database(), current_schema()")
+            print("Snowflake context:", cur.fetchone())
             print("Target database/schema:", db, raw_schema)
 
             # Use existing database; create schema if allowed
@@ -130,7 +97,8 @@ def seed_raw_sources():
             ]
             _exec_many(cur, delete_old_seed_rows)
 
-            # Insert PMS seed rows (IMPORTANT: has 'ID' numeric key for reservation_id)
+            # PMS seed rows
+            # NOTE: Status_code uses BOOKED to satisfy your dim_status accepted_values tests
             seed_pms = [
                 f"""
                 INSERT INTO PMS_RAW (RECORD, SRC_FILE_NAME)
@@ -144,7 +112,7 @@ def seed_raw_sources():
                     "Hotel_id": 101,
                     "Booking_start_date": "2025-12-27",
                     "Booking_end_date": "2025-12-29",
-                    "Status_code": "CONFIRMED",
+                    "Status_code": "BOOKED",
                     "Room_rate": 999.00,
                     "Total_amount_gross": 1998.00
                   }}'),
@@ -162,7 +130,7 @@ def seed_raw_sources():
                     "Hotel_id": 101,
                     "Booking_start_date": "2025-12-28",
                     "Booking_end_date": "2025-12-30",
-                    "Status_code": "CONFIRMED",
+                    "Status_code": "BOOKED",
                     "Room_rate": 799.00,
                     "Total_amount_gross": 1598.00
                   }}'),
@@ -171,7 +139,7 @@ def seed_raw_sources():
             ]
             _exec_many(cur, seed_pms)
 
-            # Insert Survey seed row with question_*/answer_* keys (so your FLATTEN model produces rows)
+            # Survey seed row with question/answer keys (so your SILVER flatten model produces rows)
             seed_survey = [
                 f"""
                 INSERT INTO SURVEY_RAW (RECORD, SRC_FILE_NAME)
@@ -204,7 +172,7 @@ def seed_raw_sources():
             ]
             _exec_many(cur, seed_survey)
 
-            # Insert Membership seed rows (tier statuses to satisfy accepted_values tests)
+            # Membership seed rows (tiers)
             seed_membership = [
                 f"""
                 INSERT INTO MEMBERSHIP_RAW (ID, FIRST_NAME, LAST_NAME, STATUS, IS_ACTIVE, SRC_FILE_NAME)
@@ -216,7 +184,7 @@ def seed_raw_sources():
             ]
             _exec_many(cur, seed_membership)
 
-            # Small sanity prints (shows counts after seed)
+            # Sanity counts
             cur.execute("select count(*) from PMS_RAW where src_file_name = %s", (PMS_SEED_FILE,))
             print("Seeded PMS_RAW rows:", cur.fetchone()[0])
 
@@ -226,7 +194,10 @@ def seed_raw_sources():
             cur.execute("select count(*) from MEMBERSHIP_RAW where src_file_name = %s", (MEMBERSHIP_SEED_FILE,))
             print("Seeded MEMBERSHIP_RAW rows:", cur.fetchone()[0])
 
-    print("✅ Seed completed successfully.")
+        conn.commit()
+        print("Seed completed successfully.")
+    finally:
+        conn.close()
 
 
 with DAG(
